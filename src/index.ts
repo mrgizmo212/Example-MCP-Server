@@ -1,9 +1,9 @@
-import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
+import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import express, { Request, Response } from 'express';
+import express, { Request, Response } from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   Tool,
   ToolSchema,
@@ -11,16 +11,16 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-console.error('Starting Streamable HTTP server...');
+console.error("Starting Streamable HTTP server...");
 
 const app = express();
 app.use(express.json());
 
-const { DEBUG = 'true' } = process.env;
+const { DEBUG = "true" } = process.env;
 
 const debug = (...args: any[]) => {
-  if (DEBUG?.toLowerCase() === 'true' || DEBUG === '1') {
-    console.error('[DEBUG]', ...args);
+  if (DEBUG?.toLowerCase() === "true" || DEBUG === "1") {
+    console.error("[DEBUG]", ...args);
   }
 };
 
@@ -33,20 +33,38 @@ type ToolInput = z.infer<typeof ToolInputSchema>;
 
 // Define tool schemas
 const HelloWorldSchema = z.object({
-  name: z.string().describe("The name to greet")
+  name: z.string().describe("The name to greet"),
 });
 
 const GetServerInfoSchema = z.object({});
 
 const LongRunningTestSchema = z.object({
-  duration: z.number().optional().default(30).describe("Duration in seconds (default: 30)"),
-  steps: z.number().optional().default(10).describe("Number of progress steps (default: 10)"),
-  message: z.string().optional().describe("Optional message to include in the response")
+  duration: z
+    .number()
+    .optional()
+    .default(30)
+    .describe("Duration in seconds (default: 30)"),
+  steps: z
+    .number()
+    .optional()
+    .default(10)
+    .describe("Number of progress steps (default: 10)"),
+  message: z
+    .string()
+    .optional()
+    .describe("Optional message to include in the response"),
 });
 
 const SlowTestSchema = z.object({
-  message: z.string().optional().describe("Optional message to include in the response"),
-  steps: z.number().optional().default(20).describe("Number of progress steps (default: 20)")
+  message: z
+    .string()
+    .optional()
+    .describe("Optional message to include in the response"),
+  steps: z
+    .number()
+    .optional()
+    .default(20)
+    .describe("Number of progress steps (default: 20)"),
 });
 
 // Tool names enum
@@ -54,7 +72,7 @@ enum ToolName {
   HELLO_WORLD = "hello_world",
   GET_SERVER_INFO = "get_server_info",
   LONG_RUNNING_TEST = "long_running_test",
-  SLOW_TEST = "slow_test"
+  SLOW_TEST = "slow_test",
 }
 
 // Function to create a new MCP server instance
@@ -65,16 +83,17 @@ function createServer() {
       version: "1.0.0",
     },
     {
-      instructions: "A simple test MCP server implemented with Streamable HTTP transport. Supports basic tools and long-running operations with progress updates.",
+      instructions:
+        "A simple test MCP server implemented with Streamable HTTP transport. Supports basic tools and long-running operations with progress updates.",
       capabilities: {
-        tools: {}
-      }
+        tools: {},
+      },
     }
   );
 
   // Set up the list tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    console.error('[TOOLS LIST] Listing available tools');
+    console.error("[TOOLS LIST] Listing available tools");
     const tools: Tool[] = [
       {
         name: ToolName.HELLO_WORLD,
@@ -88,49 +107,62 @@ function createServer() {
       },
       {
         name: ToolName.LONG_RUNNING_TEST,
-        description: "A test tool that demonstrates long-running operations with progress updates",
+        description:
+          "A test tool that demonstrates long-running operations with progress updates",
         inputSchema: zodToJsonSchema(LongRunningTestSchema) as ToolInput,
       },
       {
         name: ToolName.SLOW_TEST,
-        description: "A test tool that takes 10 minutes to complete and returns timing information",
+        description:
+          "A test tool that takes 10 minutes to complete and returns timing information",
         inputSchema: zodToJsonSchema(SlowTestSchema) as ToolInput,
-      }
+      },
     ];
-    
+
     return { tools };
   });
 
   // Set up the call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
-    console.error(`[TOOL CALL] Tool: ${name}, Args:`, JSON.stringify(args, null, 2));
+    console.error(
+      `[TOOL CALL] Tool: ${name}, Args:`,
+      JSON.stringify(args, null, 2)
+    );
     debug(`Tool request details:`, JSON.stringify(request.params, null, 2));
 
     if (name === ToolName.HELLO_WORLD) {
       const validatedArgs = HelloWorldSchema.parse(args);
       debug(`hello_world tool called with args:`, validatedArgs);
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
       return {
-        content: [{
-          type: "text",
-          text: `Hello, ${validatedArgs.name}! Welcome to the MCP server.`
-        }]
+        content: [
+          {
+            type: "text",
+            text: `Hello, ${validatedArgs.name}! Welcome to the MCP server.`,
+          },
+        ],
       };
     }
 
     if (name === ToolName.GET_SERVER_INFO) {
       debug(`get_server_info tool called`);
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            name: "Simple Streamable HTTP MCP Server",
-            version: "1.0.0",
-            features: ["tools"],
-            timestamp: new Date().toISOString()
-          }, null, 2)
-        }]
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                name: "Simple Streamable HTTP MCP Server",
+                version: "1.0.0",
+                features: ["tools"],
+                timestamp: new Date().toISOString(),
+              },
+              null,
+              2
+            ),
+          },
+        ],
       };
     }
 
@@ -139,58 +171,78 @@ function createServer() {
       const { duration = 30, steps = 10, message } = validatedArgs;
       const startTime = new Date();
       const startTimestamp = startTime.toISOString();
-      
-      debug(`long_running_test started at: ${startTimestamp}, duration: ${duration}s, steps: ${steps}`);
-      
+
+      debug(
+        `long_running_test started at: ${startTimestamp}, duration: ${duration}s, steps: ${steps}`
+      );
+
       // Get progress token if available
       const progressToken = request.params._meta?.progressToken;
       const stepDurationMs = (duration * 1000) / steps;
-      
+
       // Send progress updates
       for (let i = 1; i <= steps; i++) {
-        await new Promise(resolve => setTimeout(resolve, stepDurationMs));
-        
+        await new Promise((resolve) => setTimeout(resolve, stepDurationMs));
+
         if (progressToken !== undefined) {
           try {
-            console.error(`[PROGRESS] Sending progress update: ${i}/${steps} for token: ${progressToken}`);
-            await server.notification({
-              method: "notifications/progress",
-              params: {
-                progress: i,
-                total: steps,
-                progressToken,
+            console.error(
+              `[PROGRESS] Sending progress update: ${i}/${steps} for token: ${progressToken}`
+            );
+            await server.notification(
+              {
+                method: "notifications/progress",
+                params: {
+                  progress: i,
+                  total: steps,
+                  progressToken,
+                },
               },
-            }, { relatedRequestId: extra.requestId });
-            console.error(`[PROGRESS] Successfully sent progress update: ${i}/${steps}`);
+              { relatedRequestId: extra.requestId }
+            );
+            console.error(
+              `[PROGRESS] Successfully sent progress update: ${i}/${steps}`
+            );
           } catch (error) {
-            console.error(`[PROGRESS ERROR] Failed to send progress notification:`, error);
+            console.error(
+              `[PROGRESS ERROR] Failed to send progress notification:`,
+              error
+            );
           }
         } else {
-          debug(`No progress token provided, skipping progress update ${i}/${steps}`);
+          debug(
+            `No progress token provided, skipping progress update ${i}/${steps}`
+          );
         }
       }
-      
+
       const endTime = new Date();
       const endTimestamp = endTime.toISOString();
       const actualDurationMs = endTime.getTime() - startTime.getTime();
-      
+
       debug(`long_running_test completed at: ${endTimestamp}`);
-      
+
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            message: message || "Long-running test completed successfully",
-            start: startTimestamp,
-            finish: endTimestamp,
-            requestedDuration: duration,
-            actualDuration: {
-              milliseconds: actualDurationMs,
-              seconds: actualDurationMs / 1000
-            },
-            steps: steps
-          }, null, 2)
-        }]
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                message: message || "Long-running test completed successfully",
+                start: startTimestamp,
+                finish: endTimestamp,
+                requestedDuration: duration,
+                actualDuration: {
+                  milliseconds: actualDurationMs,
+                  seconds: actualDurationMs / 1000,
+                },
+                steps: steps,
+              },
+              null,
+              2
+            ),
+          },
+        ],
       };
     }
 
@@ -199,68 +251,90 @@ function createServer() {
       const { message, steps = 20 } = validatedArgs;
       const startTime = new Date();
       const startTimestamp = startTime.toISOString();
-      
+
       debug(`slow_test tool started at: ${startTimestamp}`);
-      
+
       // Get progress token if available
       const progressToken = request.params._meta?.progressToken;
-      
+
       // Wait for 10 minutes (600,000 milliseconds)
       const tenMinutesMs = 10 * 60 * 1000;
       const stepDurationMs = tenMinutesMs / steps;
-      
+
       // Send progress updates
       for (let i = 1; i <= steps; i++) {
-        await new Promise(resolve => setTimeout(resolve, stepDurationMs));
-        
+        await new Promise((resolve) => setTimeout(resolve, stepDurationMs));
+
         if (progressToken !== undefined) {
           try {
-            console.error(`[PROGRESS] Sending progress update: ${i}/${steps} for token: ${progressToken}`);
-            await server.notification({
-              method: "notifications/progress",
-              params: {
-                progress: i,
-                total: steps,
-                progressToken,
+            console.error(
+              `[PROGRESS] Sending progress update: ${i}/${steps} for token: ${progressToken}`
+            );
+            await server.notification(
+              {
+                method: "notifications/progress",
+                params: {
+                  progress: i,
+                  total: steps,
+                  progressToken,
+                },
               },
-            }, { relatedRequestId: extra.requestId });
-            console.error(`[PROGRESS] Successfully sent progress update: ${i}/${steps}`);
+              { relatedRequestId: extra.requestId }
+            );
+            console.error(
+              `[PROGRESS] Successfully sent progress update: ${i}/${steps}`
+            );
           } catch (error) {
-            console.error(`[PROGRESS ERROR] Failed to send progress notification:`, error);
+            console.error(
+              `[PROGRESS ERROR] Failed to send progress notification:`,
+              error
+            );
           }
         } else {
-          debug(`No progress token provided, skipping progress update ${i}/${steps}`);
+          debug(
+            `No progress token provided, skipping progress update ${i}/${steps}`
+          );
         }
-        
+
         // Log progress every 5 steps
         if (i % 5 === 0) {
           const elapsedMinutes = (i / steps) * 10;
-          console.error(`[SLOW_TEST] Progress: ${i}/${steps} steps (${elapsedMinutes.toFixed(1)} minutes elapsed)`);
+          console.error(
+            `[SLOW_TEST] Progress: ${i}/${steps} steps (${elapsedMinutes.toFixed(
+              1
+            )} minutes elapsed)`
+          );
         }
       }
-      
+
       const endTime = new Date();
       const endTimestamp = endTime.toISOString();
       const durationMs = endTime.getTime() - startTime.getTime();
       const durationMinutes = durationMs / (60 * 1000);
-      
+
       debug(`slow_test tool completed at: ${endTimestamp}`);
-      
+
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            message: message || "Slow test completed successfully",
-            start: startTimestamp,
-            finish: endTimestamp,
-            duration: {
-              milliseconds: durationMs,
-              seconds: durationMs / 1000,
-              minutes: durationMinutes
-            },
-            steps: steps
-          }, null, 2)
-        }]
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                message: message || "Slow test completed successfully",
+                start: startTimestamp,
+                finish: endTimestamp,
+                duration: {
+                  milliseconds: durationMs,
+                  seconds: durationMs / 1000,
+                  minutes: durationMinutes,
+                },
+                steps: steps,
+              },
+              null,
+              2
+            ),
+          },
+        ],
       };
     }
 
@@ -271,40 +345,44 @@ function createServer() {
 }
 
 // Handle POST requests
-app.post('/mcp', async (req: Request, res: Response) => {
-  console.error('Received MCP POST request');
-  console.error('Request method:', req.body?.method);
-  debug('Headers:', JSON.stringify(req.headers, null, 2));
-  debug('Body:', JSON.stringify(req.body, null, 2));
-  
+app.post("/mcp", async (req: Request, res: Response) => {
+  console.error("Received MCP POST request");
+  console.error("Request method:", req.body?.method);
+  debug("Headers:", JSON.stringify(req.headers, null, 2));
+  debug("Body:", JSON.stringify(req.body, null, 2));
+
   try {
     // Check for existing session ID
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
     let transport: StreamableHTTPServerTransport;
 
     if (sessionId && transports.has(sessionId)) {
       // Reuse existing transport
       transport = transports.get(sessionId)!;
-      console.error(`[SESSION] Reusing existing transport for session ${sessionId}`);
+      console.error(
+        `[SESSION] Reusing existing transport for session ${sessionId}`
+      );
     } else if (!sessionId) {
       // New initialization request
-      console.error('[SESSION] Creating new server for initialization request');
+      console.error("[SESSION] Creating new server for initialization request");
       const { server } = createServer();
-      
+
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         enableJsonResponse: true,
         onsessioninitialized: (sessionId: string) => {
           console.error(`Session initialized with ID: ${sessionId}`);
           transports.set(sessionId, transport);
-        }
+        },
       });
 
       // Set up onclose handler to clean up transport when closed
       server.onclose = async () => {
         const sid = transport.sessionId;
         if (sid && transports.has(sid)) {
-          console.error(`Transport closed for session ${sid}, removing from transports map`);
+          console.error(
+            `Transport closed for session ${sid}, removing from transports map`
+          );
           transports.delete(sid);
         }
       };
@@ -316,10 +394,10 @@ app.post('/mcp', async (req: Request, res: Response) => {
     } else {
       // Invalid request - session ID provided but not found
       res.status(400).json({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         error: {
           code: -32000,
-          message: 'Bad Request: Invalid session ID',
+          message: "Bad Request: Invalid session ID",
         },
         id: req?.body?.id,
       });
@@ -329,13 +407,13 @@ app.post('/mcp', async (req: Request, res: Response) => {
     // Handle the request with existing transport
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error('Error handling MCP request:', error);
+    console.error("Error handling MCP request:", error);
     if (!res.headersSent) {
       res.status(500).json({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         error: {
           code: -32603,
-          message: 'Internal server error',
+          message: "Internal server error",
         },
         id: req?.body?.id,
       });
@@ -344,23 +422,23 @@ app.post('/mcp', async (req: Request, res: Response) => {
 });
 
 // Handle GET requests for SSE streams
-app.get('/mcp', async (req: Request, res: Response) => {
-  console.error('Received MCP GET request');
-  const sessionId = req.headers['mcp-session-id'] as string | undefined;
-  
+app.get("/mcp", async (req: Request, res: Response) => {
+  console.error("Received MCP GET request");
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
   if (!sessionId || !transports.has(sessionId)) {
     res.status(400).json({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       error: {
         code: -32000,
-        message: 'Bad Request: No valid session ID provided',
+        message: "Bad Request: No valid session ID provided",
       },
       id: null,
     });
     return;
   }
 
-  const lastEventId = req.headers['last-event-id'] as string | undefined;
+  const lastEventId = req.headers["last-event-id"] as string | undefined;
   if (lastEventId) {
     console.error(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
   } else {
@@ -372,34 +450,36 @@ app.get('/mcp', async (req: Request, res: Response) => {
 });
 
 // Handle DELETE requests for session termination
-app.delete('/mcp', async (req: Request, res: Response) => {
-  const sessionId = req.headers['mcp-session-id'] as string | undefined;
-  
+app.delete("/mcp", async (req: Request, res: Response) => {
+  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
   if (!sessionId || !transports.has(sessionId)) {
     res.status(400).json({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       error: {
         code: -32000,
-        message: 'Bad Request: No valid session ID provided',
+        message: "Bad Request: No valid session ID provided",
       },
       id: null,
     });
     return;
   }
 
-  console.error(`Received session termination request for session ${sessionId}`);
+  console.error(
+    `Received session termination request for session ${sessionId}`
+  );
 
   try {
     const transport = transports.get(sessionId)!;
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error('Error handling session termination:', error);
+    console.error("Error handling session termination:", error);
     if (!res.headersSent) {
       res.status(500).json({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         error: {
           code: -32603,
-          message: 'Error handling session termination',
+          message: "Error handling session termination",
         },
         id: null,
       });
@@ -408,15 +488,15 @@ app.delete('/mcp', async (req: Request, res: Response) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get("/health", (req, res) => {
   res.json({
-    status: 'ok',
+    status: "ok",
     server: {
       name: "simple-streamable-http-mcp-server",
-      version: "1.0.0"
+      version: "1.0.0",
     },
-    transport: 'streamable-http',
-    activeSessions: transports.size
+    transport: "streamable-http",
+    activeSessions: transports.size,
   });
 });
 
@@ -426,12 +506,14 @@ app.listen(PORT, () => {
   console.error(`MCP Streamable HTTP Server listening on port ${PORT}`);
   console.log(`📨 MCP endpoint: http://localhost:${PORT}/mcp`);
   console.log(`❤️  Health check: http://localhost:${PORT}/health`);
-  console.log(`🛠️  Available tools: hello_world, get_server_info, long_running_test, slow_test`);
+  console.log(
+    `🛠️  Available tools: hello_world, get_server_info, long_running_test, slow_test`
+  );
 });
 
 // Handle server shutdown
-process.on('SIGINT', async () => {
-  console.error('Shutting down server...');
+process.on("SIGINT", async () => {
+  console.error("Shutting down server...");
 
   // Close all active transports
   for (const [sessionId, transport] of transports) {
@@ -444,6 +526,6 @@ process.on('SIGINT', async () => {
     }
   }
 
-  console.error('Server shutdown complete');
+  console.error("Server shutdown complete");
   process.exit(0);
 });
