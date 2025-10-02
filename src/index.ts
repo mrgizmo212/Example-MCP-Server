@@ -11,11 +11,12 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
+  ToolName,
+  SlowTestSchema,
   HelloWorldSchema,
+  GetDatetimeSchema,
   GetServerInfoSchema,
   LongRunningTestSchema,
-  SlowTestSchema,
-  ToolName,
 } from "./tools/schemas.js";
 
 console.error("Starting Streamable HTTP server...");
@@ -79,6 +80,11 @@ function createServer() {
         description:
           "A test tool that takes 10 minutes to complete and returns timing information",
         inputSchema: zodToJsonSchema(SlowTestSchema) as ToolInput,
+      },
+      {
+        name: ToolName.GET_DATETIME,
+        description: "Get the current date and time in ISO 8601 format",
+        inputSchema: zodToJsonSchema(GetDatetimeSchema) as ToolInput,
       },
     ];
 
@@ -298,6 +304,13 @@ function createServer() {
             ),
           },
         ],
+      };
+    }
+
+    if (name === ToolName.GET_DATETIME) {
+      debug(`get_datetime tool called`);
+      return {
+        content: [{ type: "text", text: new Date().toISOString() }],
       };
     }
 

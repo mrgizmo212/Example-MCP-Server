@@ -5,6 +5,7 @@ export enum ToolName {
   GET_SERVER_INFO = "get_server_info",
   LONG_RUNNING_TEST = "long_running_test",
   SLOW_TEST = "slow_test",
+  GET_DATETIME = "get_datetime",
 }
 
 // Define tool schemas
@@ -42,3 +43,5 @@ export const SlowTestSchema = z.object({
     .default(20)
     .describe("Number of progress steps (default: 20)"),
 });
+
+export const GetDatetimeSchema = z.object({});
