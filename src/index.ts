@@ -45,35 +45,12 @@ const debug = (...args: any[]) => {
 // Store transports by session ID
 const transports: Map<string, StreamableHTTPServerTransport> = new Map();
 
-// Queue and worker references
-let messageQueue: Queue;
-let messageWorker: Worker;
-
 // Tool schemas and types
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
 
-// Function to create a new MCP server instance
-function createServer() {
-  const server = new Server(
-    {
-      name: "simple-streamable-http-mcp-server",
-      version: "1.0.0",
-    },
-    {
-      instructions:
-        "A simple test MCP server implemented with Streamable HTTP transport. Supports basic tools and long-running operations with progress updates.",
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
-
-  if (!process.env.SCHEDULER_MCP_TOKEN) {
-    throw new Error("SCHEDULER_MCP_TOKEN is not set");
-  }
-
-  // Set up the Redis connection
+// Initialize Redis connection configuration
+function getRedisConnection() {
   let connection: any = {};
 
   if (process.env.REDIS_URL) {
@@ -114,7 +91,134 @@ function createServer() {
       "Either REDIS_URL or REDIS_HOST environment variable must be set"
     );
   }
-  messageQueue = new Queue("messageQueue", {
+
+  return connection;
+}
+
+// Initialize Queue and Worker once at startup
+const connection = getRedisConnection();
+const messageQueue = new Queue("messageQueue", {
+  connection: {
+    ...connection,
+    retryStrategy: (times: number) => {
+      if (times > 3) {
+        console.error(`Redis connection failed after ${times} attempts`);
+        return null; // Stop retrying
+      }
+      const delay = Math.min(times * 1000, 3000); // Max 3 second delay
+      console.error(
+        `Redis connection attempt ${times}, retrying in ${delay}ms`
+      );
+      return delay;
+    },
+  },
+  defaultJobOptions: {
+    removeOnComplete: true,
+    removeOnFail: true,
+  },
+});
+
+const messageWorker = new Worker(
+  "messageQueue",
+  async (job) => {
+    console.error(`Job started: ${job?.id}`);
+    console.error(`Job data: ${JSON.stringify(job?.data, null, 2)}`);
+
+    const librechatUrl = process.env.LIBRECHAT_BASE_URL;
+    const ttgServiceApiKey = process.env.TTG_SERVICE_API_KEY;
+
+    if (!librechatUrl) {
+      throw new Error("LIBRECHAT_BASE_URL is not set");
+    }
+    if (!ttgServiceApiKey) {
+      throw new Error("TTG_SERVICE_API_KEY is not set");
+    }
+
+    // POST to LibreChat API using axios
+    try {
+      const response = await axios.post(
+        librechatUrl + "/api/service/convos/send",
+        job?.data,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": ttgServiceApiKey,
+          },
+          timeout: 30000,
+          responseType: "stream",
+        }
+      );
+
+      // Handle streaming response - always a stream since responseType is "stream"
+      const isEventStream =
+        response.headers["content-type"]?.includes("text/event-stream");
+
+      if (isEventStream) {
+        console.error("Handling SSE streaming response from LibreChat");
+      } else {
+        console.error("Handling standard response from LibreChat");
+      }
+
+      // Collect all data from the stream
+      const chunks: Buffer[] = [];
+
+      response.data.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+        if (isEventStream) {
+          const text = chunk.toString();
+          console.error("SSE chunk:", text);
+        }
+      });
+
+      // Wait for stream to complete
+      await new Promise<void>((resolve, reject) => {
+        response.data.on("end", () => {
+          console.error("Stream ended successfully");
+
+          if (!isEventStream && chunks.length > 0) {
+            // For non-streaming responses, parse and log the complete data
+            try {
+              const fullData = Buffer.concat(chunks).toString();
+              console.error("LibreChat response:", fullData);
+
+              // Try to parse as JSON
+              try {
+                const jsonData = JSON.parse(fullData);
+                console.error(
+                  "Parsed JSON response:",
+                  JSON.stringify(jsonData, null, 2)
+                );
+              } catch {
+                // Not JSON, that's okay
+                console.error("Response is not JSON");
+              }
+            } catch (error) {
+              console.error("Error processing response data:", error);
+            }
+          }
+
+          resolve();
+        });
+
+        response.data.on("error", (error: Error) => {
+          console.error("Stream error:", error);
+          reject(error);
+        });
+      });
+
+      console.error("LibreChat request completed successfully");
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(
+          `Failed to POST to LibreChat API: ${
+            error.response?.statusText || error.message
+          }`
+        );
+      }
+      throw error;
+    }
+  },
+  {
     connection: {
       ...connection,
       retryStrategy: (times: number) => {
@@ -129,146 +233,45 @@ function createServer() {
         return delay;
       },
     },
-    defaultJobOptions: {
-      removeOnComplete: true,
-      removeOnFail: true,
-    },
-  });
+    removeOnFail: { count: 0 },
+    removeOnComplete: { count: 0 },
+  }
+);
 
-  messageWorker = new Worker(
-    "messageQueue",
-    async (job) => {
-      console.error(`Job started: ${job?.id}`);
-      console.error(`Job data: ${JSON.stringify(job?.data, null, 2)}`);
+messageWorker.on("error", (err) => {
+  console.error(err);
+});
 
-      const librechatUrl = process.env.LIBRECHAT_BASE_URL;
-      const ttgServiceApiKey = process.env.TTG_SERVICE_API_KEY;
+messageWorker.on("completed", (job: Job | undefined) => {
+  console.error(`Job completed: ${job?.id}`);
+});
 
-      if (!librechatUrl) {
-        throw new Error("LIBRECHAT_BASE_URL is not set");
-      }
-      if (!ttgServiceApiKey) {
-        throw new Error("TTG_SERVICE_API_KEY is not set");
-      }
+messageWorker.on(
+  "failed",
+  (job: Job | undefined, error: Error, prev: string) => {
+    console.error(`Job failed: ${job?.id}`, error, prev);
+  }
+);
 
-      // POST to LibreChat API using axios
-      try {
-        const response = await axios.post(
-          librechatUrl + "/api/service/convos/send",
-          job?.data,
-          {
-            headers: {
-              "Content-Type": "application/json",
-              "x-api-key": ttgServiceApiKey,
-            },
-            timeout: 30000,
-            responseType: "stream",
-          }
-        );
-
-        // Handle streaming response - always a stream since responseType is "stream"
-        const isEventStream =
-          response.headers["content-type"]?.includes("text/event-stream");
-
-        if (isEventStream) {
-          console.error("Handling SSE streaming response from LibreChat");
-        } else {
-          console.error("Handling standard response from LibreChat");
-        }
-
-        // Collect all data from the stream
-        const chunks: Buffer[] = [];
-
-        response.data.on("data", (chunk: Buffer) => {
-          chunks.push(chunk);
-          if (isEventStream) {
-            const text = chunk.toString();
-            console.error("SSE chunk:", text);
-          }
-        });
-
-        // Wait for stream to complete
-        await new Promise<void>((resolve, reject) => {
-          response.data.on("end", () => {
-            console.error("Stream ended successfully");
-
-            if (!isEventStream && chunks.length > 0) {
-              // For non-streaming responses, parse and log the complete data
-              try {
-                const fullData = Buffer.concat(chunks).toString();
-                console.error("LibreChat response:", fullData);
-
-                // Try to parse as JSON
-                try {
-                  const jsonData = JSON.parse(fullData);
-                  console.error(
-                    "Parsed JSON response:",
-                    JSON.stringify(jsonData, null, 2)
-                  );
-                } catch {
-                  // Not JSON, that's okay
-                  console.error("Response is not JSON");
-                }
-              } catch (error) {
-                console.error("Error processing response data:", error);
-              }
-            }
-
-            resolve();
-          });
-
-          response.data.on("error", (error: Error) => {
-            console.error("Stream error:", error);
-            reject(error);
-          });
-        });
-
-        console.error("LibreChat request completed successfully");
-      } catch (error) {
-        if (axios.isAxiosError(error)) {
-          throw new Error(
-            `Failed to POST to LibreChat API: ${
-              error.response?.statusText || error.message
-            }`
-          );
-        }
-        throw error;
-      }
+// Function to create a new MCP server instance
+function createServer() {
+  const server = new Server(
+    {
+      name: "simple-streamable-http-mcp-server",
+      version: "1.0.0",
     },
     {
-      connection: {
-        ...connection,
-        retryStrategy: (times: number) => {
-          if (times > 3) {
-            console.error(`Redis connection failed after ${times} attempts`);
-            return null; // Stop retrying
-          }
-          const delay = Math.min(times * 1000, 3000); // Max 3 second delay
-          console.error(
-            `Redis connection attempt ${times}, retrying in ${delay}ms`
-          );
-          return delay;
-        },
+      instructions:
+        "A simple test MCP server implemented with Streamable HTTP transport. Supports basic tools and long-running operations with progress updates.",
+      capabilities: {
+        tools: {},
       },
-      removeOnFail: { count: 0 },
-      removeOnComplete: { count: 0 },
     }
   );
 
-  messageWorker.on("error", (err) => {
-    console.error(err);
-  });
-
-  messageWorker.on("completed", (job: Job | undefined) => {
-    console.error(`Job completed: ${job?.id}`);
-  });
-
-  messageWorker.on(
-    "failed",
-    (job: Job | undefined, error: Error, prev: string) => {
-      console.error(`Job failed: ${job?.id}`, error, prev);
-    }
-  );
+  if (!process.env.SCHEDULER_MCP_TOKEN) {
+    throw new Error("SCHEDULER_MCP_TOKEN is not set");
+  }
 
   // Set up the list tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -757,8 +760,8 @@ process.on("SIGINT", async () => {
 
   // Close queue and worker
   try {
-    await messageQueue?.close();
-    await messageWorker?.close();
+    await messageQueue.close();
+    await messageWorker.close();
   } catch (error) {
     console.error(`Error closing queue/worker:`, error);
   }
