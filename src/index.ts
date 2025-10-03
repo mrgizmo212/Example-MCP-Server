@@ -167,29 +167,64 @@ function createServer() {
           }
         );
 
-        // Handle streaming response
-        if (
-          response.headers["content-type"]?.includes("text/event-stream") ||
-          response.headers["content-type"]?.includes("text/plain")
-        ) {
-          console.error("Handling streaming response from LibreChat");
+        // Handle streaming response - always a stream since responseType is "stream"
+        const isEventStream =
+          response.headers["content-type"]?.includes("text/event-stream");
 
-          response.data.on("data", (chunk: Buffer) => {
-            // const text = chunk.toString();
-            // console.error("Stream chunk:", text);
-          });
+        if (isEventStream) {
+          console.error("Handling SSE streaming response from LibreChat");
+        } else {
+          console.error("Handling standard response from LibreChat");
+        }
 
+        // Collect all data from the stream
+        const chunks: Buffer[] = [];
+
+        response.data.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+          if (isEventStream) {
+            const text = chunk.toString();
+            console.error("SSE chunk:", text);
+          }
+        });
+
+        // Wait for stream to complete
+        await new Promise<void>((resolve, reject) => {
           response.data.on("end", () => {
-            console.error("Stream ended");
+            console.error("Stream ended successfully");
+
+            if (!isEventStream && chunks.length > 0) {
+              // For non-streaming responses, parse and log the complete data
+              try {
+                const fullData = Buffer.concat(chunks).toString();
+                console.error("LibreChat response:", fullData);
+
+                // Try to parse as JSON
+                try {
+                  const jsonData = JSON.parse(fullData);
+                  console.error(
+                    "Parsed JSON response:",
+                    JSON.stringify(jsonData, null, 2)
+                  );
+                } catch {
+                  // Not JSON, that's okay
+                  console.error("Response is not JSON");
+                }
+              } catch (error) {
+                console.error("Error processing response data:", error);
+              }
+            }
+
+            resolve();
           });
 
           response.data.on("error", (error: Error) => {
             console.error("Stream error:", error);
+            reject(error);
           });
-        } else {
-          const data = await response.data;
-          console.error("LibreChat JSON response:", data);
-        }
+        });
+
+        console.error("LibreChat request completed successfully");
       } catch (error) {
         if (axios.isAxiosError(error)) {
           throw new Error(
