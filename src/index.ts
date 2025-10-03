@@ -631,44 +631,20 @@ app.get("/mcp", async (req: Request, res: Response) => {
     console.error(`Establishing new SSE stream for session ${sessionId}`);
   }
 
-  // Set SSE headers
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
-  res.setHeader("X-Accel-Buffering", "no"); // Disable proxy buffering
-
   const transport = transports.get(sessionId)!;
 
-  // Send initial comment immediately to flush buffers and establish connection
-  res.write(": connected\n\n");
-  res.flushHeaders();
-
-  // Add keep-alive ping
-  const keepAlive = setInterval(() => {
-    if (!res.destroyed) {
-      res.write(": ping\n\n");
-    } else {
-      clearInterval(keepAlive);
-    }
-  }, 30000); // Send ping every 30 seconds
-
-  // Clean up on close
+  // Clean up logging on close
   req.on("close", () => {
-    clearInterval(keepAlive);
     console.error(`SSE connection closed for session ${sessionId}`);
   });
 
   req.on("error", (error) => {
-    clearInterval(keepAlive);
     console.error(`SSE connection error for session ${sessionId}:`, error);
   });
 
   try {
     await transport.handleRequest(req, res);
   } catch (error) {
-    clearInterval(keepAlive);
     console.error(
       `Error handling SSE request for session ${sessionId}:`,
       error
