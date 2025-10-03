@@ -339,9 +339,6 @@ function createServer() {
         delay_ms,
         conversation_id,
         is_temporary,
-        endpoint,
-        model,
-        agent_id,
         repeat_every_ms,
       } = validatedArgs;
 
@@ -384,20 +381,10 @@ function createServer() {
         throw new Error("Run at ISO time is in the past");
       }
 
-      // Endpoint validation
-      if (!agent_id && !endpoint) {
-        throw new Error("endpoint is required when agent_id is not provided");
-      }
-      if (!agent_id && endpoint?.trim().toLowerCase() === "agents") {
-        throw new Error('agent_id is required when endpoint is "agents"');
-      }
-      if (!agent_id && !model) {
-        throw new Error("model is required when agent_id is not provided");
-      }
-      if (agent_id && (endpoint || model)) {
-        throw new Error(
-          "Agent ID and (endpoint + model) cannot be used together"
-        );
+      // Agent ID validation
+      const agent_id = process.env.AGENT_ID;
+      if (!agent_id) {
+        throw new Error("AGENT_ID environment variable is not set");
       }
 
       const jobData = {
@@ -405,8 +392,6 @@ function createServer() {
         user_id: userId,
         conversation_id,
         is_temporary,
-        endpoint,
-        model,
         agent_id,
         repeat_every_ms,
       };

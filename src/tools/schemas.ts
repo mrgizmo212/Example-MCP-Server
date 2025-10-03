@@ -22,15 +22,6 @@ export const ScheduleMessageSchema = z.object({
     .default(
       process.env.DEFAULT_TEMP?.toLowerCase() === "false" ? false : true
     ),
-  endpoint: z
-    .string()
-    .describe("Provider id (e.g., 'openAI', 'azureOpenAI')")
-    .optional(),
-  model: z
-    .string()
-    .describe("Model identifier for the chosen provider")
-    .optional(),
-  agent_id: z.string().describe("Optional agent identifier").optional(),
   repeat_every_ms: z
     .number()
     .describe("Recurring interval in milliseconds")
