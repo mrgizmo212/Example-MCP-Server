@@ -349,9 +349,11 @@ function createServer() {
       const jobs = await messageQueue.getJobs();
       const jobSchedulers = await messageQueue.getJobSchedulers();
       const userJobs = jobs.filter((job) => job.data.user_id === userId);
-      const userSchedulers = jobSchedulers.filter((scheduler) =>
-        scheduler.id?.includes(`-${userId}-`)
-      );
+      const userSchedulers = jobSchedulers.filter((scheduler) => {
+        if (!scheduler.id) return false;
+        const parts = scheduler.id.split("-");
+        return parts.length >= 3 && parts[1] === userId;
+      });
       return {
         content: [
           {
@@ -396,8 +398,11 @@ function createServer() {
           `Job not found, trying to remove as scheduler: ${validatedArgs.job_id}`
         );
 
-        // Check if scheduler ID contains user ID
-        if (!validatedArgs.job_id.includes(`-${userId}-`)) {
+        // Check if scheduler ID belongs to user
+        // Format: {prefix}-{userId}-{uuid}
+        // The userId must be the first segment after the prefix
+        const parts = validatedArgs.job_id.split("-");
+        if (parts.length < 3 || parts[1] !== userId) {
           throw new Error(
             `Scheduler ${validatedArgs.job_id} does not belong to user`
           );
