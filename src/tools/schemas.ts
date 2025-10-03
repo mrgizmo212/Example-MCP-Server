@@ -6,6 +6,7 @@ export enum ToolName {
   LONG_RUNNING_TEST = "long_running_test",
   SLOW_TEST = "slow_test",
   GET_DATETIME = "get_datetime",
+  SCHEDULE_MESSAGE = "schedule_message",
 }
 
 // Define tool schemas
@@ -45,3 +46,28 @@ export const SlowTestSchema = z.object({
 });
 
 export const GetDatetimeSchema = z.object({});
+
+export const ScheduleMessageSchema = z.object({
+  message: z.string().describe("The content to send in the message"),
+  run_at_iso: z.string().describe("ISO-8601 timestamp to run at").optional(),
+  delay_ms: z.number().describe("Delay in milliseconds from now").optional(),
+  conversation_id: z.string().describe("Target conversation UUID").optional(),
+  is_temporary: z
+    .boolean()
+    .describe("Mark conversation as temporary")
+    .optional()
+    .default(false),
+  endpoint: z
+    .string()
+    .describe("Provider id (e.g., 'openAI', 'azureOpenAI')")
+    .optional(),
+  model: z
+    .string()
+    .describe("Model identifier for the chosen provider")
+    .optional(),
+  agent_id: z.string().describe("Optional agent identifier").optional(),
+  repeat_every_ms: z
+    .number()
+    .describe("Recurring interval in milliseconds")
+    .optional(),
+});
