@@ -45,6 +45,9 @@ const debug = (...args: any[]) => {
 // Store transports by session ID
 const transports: Map<string, StreamableHTTPServerTransport> = new Map();
 
+// Per-user locks to prevent race conditions when scheduling jobs
+const userLocks: Map<string, Promise<void>> = new Map();
+
 // Tool schemas and types
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
@@ -333,117 +336,139 @@ function createServer() {
       const validatedArgs = ScheduleMessageSchema.parse(args);
       debug(`schedule_message tool called with args:`, validatedArgs);
 
-      const {
-        message,
-        run_at_iso,
-        delay_ms,
-        conversation_id,
-        is_temporary,
-        repeat_every_ms,
-      } = validatedArgs;
+      // Wait for any existing lock for this user
+      while (userLocks.has(userId as string)) {
+        await userLocks.get(userId as string);
+      }
 
-      // Check if user has reached max jobs limit
-      const maxJobs = parseInt(process.env.MAX_JOBS || "3");
-      const jobs = await messageQueue.getJobs();
-      const jobSchedulers = await messageQueue.getJobSchedulers();
-      const userJobs = jobs.filter((job) => job.data.user_id === userId);
-      const userSchedulers = jobSchedulers.filter((scheduler) => {
-        if (!scheduler.id) return false;
-        const parts = scheduler.id.split("-");
-        return parts.length >= 3 && parts[1] === userId;
+      // Create a new lock for this user
+      let releaseLock: () => void;
+      const lockPromise = new Promise<void>((resolve) => {
+        releaseLock = resolve;
       });
-      const totalUserJobs = userJobs.length + userSchedulers.length;
+      userLocks.set(userId as string, lockPromise);
 
-      if (totalUserJobs >= maxJobs) {
-        throw new Error(
-          `Maximum number of scheduled jobs (${maxJobs}) reached. You currently have ${totalUserJobs} scheduled jobs. Please cancel some jobs before scheduling new ones.`
-        );
-      }
+      try {
+        const {
+          message,
+          run_at_iso,
+          delay_ms,
+          conversation_id,
+          is_temporary,
+          repeat_every_ms,
+        } = validatedArgs;
 
-      // Message validation
-      if (!message) {
-        throw new Error("Message is required");
-      }
-
-      // Timing validation
-      if (!run_at_iso && !delay_ms) {
-        throw new Error("Run at ISO time or delay in milliseconds is required");
-      }
-
-      const effective_delay_ms = run_at_iso
-        ? new Date(run_at_iso).getTime() - new Date().getTime()
-        : delay_ms;
-
-      if (!effective_delay_ms) {
-        throw new Error("Failed to calculate effective delay in milliseconds");
-      }
-      if (effective_delay_ms < 0) {
-        throw new Error("Run at ISO time is in the past");
-      }
-
-      // Agent ID validation
-      const agent_id = process.env.AGENT_ID;
-      if (!agent_id) {
-        throw new Error("AGENT_ID environment variable is not set");
-      }
-
-      const jobData = {
-        message,
-        user_id: userId,
-        conversation_id,
-        is_temporary,
-        agent_id,
-        repeat_every_ms,
-      };
-
-      let job: Job;
-
-      if (!repeat_every_ms) {
-        job = await messageQueue.add("schedule_message", jobData, {
-          delay: effective_delay_ms,
-          removeOnComplete: true,
-          removeOnFail: true,
+        // Check if user has reached max jobs limit (now protected by lock)
+        const maxJobs = parseInt(process.env.MAX_JOBS || "3");
+        const jobs = await messageQueue.getJobs();
+        const jobSchedulers = await messageQueue.getJobSchedulers();
+        const userJobs = jobs.filter((job) => job.data.user_id === userId);
+        const userSchedulers = jobSchedulers.filter((scheduler) => {
+          if (!scheduler.id) return false;
+          const parts = scheduler.id.split("-");
+          return parts.length >= 3 && parts[1] === userId;
         });
-      } else {
-        job = await messageQueue.upsertJobScheduler(
-          "repeat_schedule_message-" + userId + "-" + randomUUID(),
-          {
-            every: repeat_every_ms,
-            startDate: new Date(new Date().getTime() + effective_delay_ms),
-          },
-          {
-            name: `${userId}`,
-            data: jobData,
-            opts: {
-              removeOnComplete: true,
-              removeOnFail: true,
-            },
-          }
-        );
-      }
+        const totalUserJobs = userJobs.length + userSchedulers.length;
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                queue: "messageQueue",
-                jobId: job.id,
-                name: "schedule_message",
-                scheduledInMs: effective_delay_ms,
-                runAt: new Date(
-                  new Date().getTime() + effective_delay_ms
-                ).toISOString(),
-                repeating: repeat_every_ms !== undefined,
-                repeatEveryMs: repeat_every_ms,
+        if (totalUserJobs >= maxJobs) {
+          throw new Error(
+            `Maximum number of scheduled jobs (${maxJobs}) reached. You currently have ${totalUserJobs} scheduled jobs. Please cancel some jobs before scheduling new ones.`
+          );
+        }
+
+        // Message validation
+        if (!message) {
+          throw new Error("Message is required");
+        }
+
+        // Timing validation
+        if (!run_at_iso && !delay_ms) {
+          throw new Error(
+            "Run at ISO time or delay in milliseconds is required"
+          );
+        }
+
+        const effective_delay_ms = run_at_iso
+          ? new Date(run_at_iso).getTime() - new Date().getTime()
+          : delay_ms;
+
+        if (!effective_delay_ms) {
+          throw new Error(
+            "Failed to calculate effective delay in milliseconds"
+          );
+        }
+        if (effective_delay_ms < 0) {
+          throw new Error("Run at ISO time is in the past");
+        }
+
+        // Agent ID validation
+        const agent_id = process.env.AGENT_ID;
+        if (!agent_id) {
+          throw new Error("AGENT_ID environment variable is not set");
+        }
+
+        const jobData = {
+          message,
+          user_id: userId,
+          conversation_id,
+          is_temporary,
+          agent_id,
+          repeat_every_ms,
+        };
+
+        let job: Job;
+
+        if (!repeat_every_ms) {
+          job = await messageQueue.add("schedule_message", jobData, {
+            delay: effective_delay_ms,
+            removeOnComplete: true,
+            removeOnFail: true,
+          });
+        } else {
+          job = await messageQueue.upsertJobScheduler(
+            "repeat_schedule_message-" + userId + "-" + randomUUID(),
+            {
+              every: repeat_every_ms,
+              startDate: new Date(new Date().getTime() + effective_delay_ms),
+            },
+            {
+              name: `${userId}`,
+              data: jobData,
+              opts: {
+                removeOnComplete: true,
+                removeOnFail: true,
               },
-              null,
-              2
-            ),
-          },
-        ],
-      };
+            }
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  queue: "messageQueue",
+                  jobId: job.id,
+                  name: "schedule_message",
+                  scheduledInMs: effective_delay_ms,
+                  runAt: new Date(
+                    new Date().getTime() + effective_delay_ms
+                  ).toISOString(),
+                  repeating: repeat_every_ms !== undefined,
+                  repeatEveryMs: repeat_every_ms,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } finally {
+        // Release the lock
+        userLocks.delete(userId as string);
+        releaseLock!();
+      }
     }
     if (name === ToolName.LIST_JOBS) {
       const jobs = await messageQueue.getJobs();
