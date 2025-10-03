@@ -275,7 +275,7 @@ function createServer() {
 
   // Set up the list tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    console.error("[TOOLS LIST] Listing available tools");
+    debug("[TOOLS LIST] Listing available tools");
     const tools: Tool[] = [
       {
         name: ToolName.GET_DATETIME,
@@ -305,11 +305,8 @@ function createServer() {
   // Set up the call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
-    console.error(
-      `[TOOL CALL] Tool: ${name}, Args:`,
-      JSON.stringify(args, null, 2)
-    );
-    debug(`Tool request details:`, JSON.stringify(request.params, null, 2));
+    console.error(`[TOOL CALL] ${name}`);
+    debug(`Tool: ${name}, Args:`, JSON.stringify(args, null, 2));
 
     const token = extra.requestInfo?.headers?.["authorization"]
       ?.toString()
@@ -532,8 +529,7 @@ function createServer() {
 
 // Handle POST requests
 app.post("/mcp", async (req: Request, res: Response) => {
-  console.error("Received MCP POST request");
-  console.error("Request method:", req.body?.method);
+  debug(`Received MCP POST request: ${req.body?.method || "unknown"}`);
   debug("Headers:", JSON.stringify(req.headers, null, 2));
   debug("Body:", JSON.stringify(req.body, null, 2));
 
@@ -545,12 +541,10 @@ app.post("/mcp", async (req: Request, res: Response) => {
     if (sessionId && transports.has(sessionId)) {
       // Reuse existing transport
       transport = transports.get(sessionId)!;
-      console.error(
-        `[SESSION] Reusing existing transport for session ${sessionId}`
-      );
+      debug(`[SESSION] Reusing existing transport for session ${sessionId}`);
     } else if (!sessionId) {
       // New initialization request
-      console.error("[SESSION] Creating new server for initialization request");
+      debug("[SESSION] Creating new server for initialization request");
       const { server } = createServer();
 
       transport = new StreamableHTTPServerTransport({
@@ -609,7 +603,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
 
 // Handle GET requests for SSE streams
 app.get("/mcp", async (req: Request, res: Response) => {
-  console.error("Received MCP GET request");
+  debug("Received MCP GET request (SSE stream)");
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
   if (!sessionId || !transports.has(sessionId)) {
@@ -626,20 +620,28 @@ app.get("/mcp", async (req: Request, res: Response) => {
 
   const lastEventId = req.headers["last-event-id"] as string | undefined;
   if (lastEventId) {
-    console.error(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
+    debug(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
   } else {
-    console.error(`Establishing new SSE stream for session ${sessionId}`);
+    debug(`Establishing new SSE stream for session ${sessionId}`);
   }
 
   const transport = transports.get(sessionId)!;
 
   // Clean up logging on close
   req.on("close", () => {
-    console.error(`SSE connection closed for session ${sessionId}`);
+    debug(`SSE connection closed for session ${sessionId}`);
   });
 
-  req.on("error", (error) => {
-    console.error(`SSE connection error for session ${sessionId}:`, error);
+  req.on("error", (error: any) => {
+    // ECONNRESET is expected - clients reconnect frequently
+    if (error?.code === "ECONNRESET") {
+      debug(
+        `SSE connection reset for session ${sessionId} (client reconnecting)`
+      );
+    } else {
+      // Log unexpected errors
+      console.error(`SSE connection error for session ${sessionId}:`, error);
+    }
   });
 
   try {
