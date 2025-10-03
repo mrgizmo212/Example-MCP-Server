@@ -19,7 +19,9 @@ export const ScheduleMessageSchema = z.object({
     .boolean()
     .describe("Mark conversation as temporary")
     .optional()
-    .default(false),
+    .default(
+      process.env.DEFAULT_TEMP?.toLowerCase() === "false" ? false : true
+    ),
   endpoint: z
     .string()
     .describe("Provider id (e.g., 'openAI', 'azureOpenAI')")
