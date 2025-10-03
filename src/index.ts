@@ -117,7 +117,6 @@ function createServer() {
   messageQueue = new Queue("messageQueue", {
     connection: {
       ...connection,
-      maxRetriesPerRequest: 3,
       retryStrategy: (times: number) => {
         if (times > 3) {
           console.error(`Redis connection failed after ${times} attempts`);
@@ -239,7 +238,6 @@ function createServer() {
     {
       connection: {
         ...connection,
-        maxRetriesPerRequest: 3,
         retryStrategy: (times: number) => {
           if (times > 3) {
             console.error(`Redis connection failed after ${times} attempts`);
