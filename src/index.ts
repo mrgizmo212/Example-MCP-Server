@@ -345,6 +345,24 @@ function createServer() {
         repeat_every_ms,
       } = validatedArgs;
 
+      // Check if user has reached max jobs limit
+      const maxJobs = parseInt(process.env.MAX_JOBS || "3");
+      const jobs = await messageQueue.getJobs();
+      const jobSchedulers = await messageQueue.getJobSchedulers();
+      const userJobs = jobs.filter((job) => job.data.user_id === userId);
+      const userSchedulers = jobSchedulers.filter((scheduler) => {
+        if (!scheduler.id) return false;
+        const parts = scheduler.id.split("-");
+        return parts.length >= 3 && parts[1] === userId;
+      });
+      const totalUserJobs = userJobs.length + userSchedulers.length;
+
+      if (totalUserJobs >= maxJobs) {
+        throw new Error(
+          `Maximum number of scheduled jobs (${maxJobs}) reached. You currently have ${totalUserJobs} scheduled jobs. Please cancel some jobs before scheduling new ones.`
+        );
+      }
+
       // Message validation
       if (!message) {
         throw new Error("Message is required");
