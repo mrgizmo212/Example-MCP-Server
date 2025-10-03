@@ -74,12 +74,62 @@ function createServer() {
   }
 
   // Set up the Redis connection
-  const connection = {
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT) : undefined,
-  };
+  let connection: any = {};
+
+  if (process.env.REDIS_URL) {
+    // Parse Redis URL (e.g., redis://user:pass@hostname:port)
+    try {
+      const url = new URL(process.env.REDIS_URL);
+      connection = {
+        host: url.hostname,
+        port: url.port ? parseInt(url.port) : 6379,
+      };
+
+      // Add authentication if present in URL
+      if (url.username) {
+        connection.username = url.username;
+      }
+      if (url.password) {
+        connection.password = url.password;
+      }
+
+      console.error(
+        `Using Redis from REDIS_URL: ${url.hostname}:${connection.port}`
+      );
+    } catch (error) {
+      console.error("Failed to parse REDIS_URL:", error);
+      throw new Error("Invalid REDIS_URL format");
+    }
+  } else if (process.env.REDIS_HOST) {
+    // Use separate host/port env vars
+    connection = {
+      host: process.env.REDIS_HOST,
+      port: process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT) : 6379,
+    };
+    console.error(
+      `Using Redis from REDIS_HOST: ${connection.host}:${connection.port}`
+    );
+  } else {
+    throw new Error(
+      "Either REDIS_URL or REDIS_HOST environment variable must be set"
+    );
+  }
   messageQueue = new Queue("messageQueue", {
-    connection,
+    connection: {
+      ...connection,
+      maxRetriesPerRequest: 3,
+      retryStrategy: (times: number) => {
+        if (times > 3) {
+          console.error(`Redis connection failed after ${times} attempts`);
+          return null; // Stop retrying
+        }
+        const delay = Math.min(times * 1000, 3000); // Max 3 second delay
+        console.error(
+          `Redis connection attempt ${times}, retrying in ${delay}ms`
+        );
+        return delay;
+      },
+    },
     defaultJobOptions: {
       removeOnComplete: true,
       removeOnFail: true,
@@ -152,7 +202,21 @@ function createServer() {
       }
     },
     {
-      connection,
+      connection: {
+        ...connection,
+        maxRetriesPerRequest: 3,
+        retryStrategy: (times: number) => {
+          if (times > 3) {
+            console.error(`Redis connection failed after ${times} attempts`);
+            return null; // Stop retrying
+          }
+          const delay = Math.min(times * 1000, 3000); // Max 3 second delay
+          console.error(
+            `Redis connection attempt ${times}, retrying in ${delay}ms`
+          );
+          return delay;
+        },
+      },
       removeOnFail: { count: 0 },
       removeOnComplete: { count: 0 },
     }
