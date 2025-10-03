@@ -7,6 +7,8 @@ export enum ToolName {
   SLOW_TEST = "slow_test",
   GET_DATETIME = "get_datetime",
   SCHEDULE_MESSAGE = "schedule_message",
+  LIST_JOBS = "list_jobs",
+  CANCEL_JOB = "cancel_job",
 }
 
 // Define tool schemas
@@ -70,4 +72,10 @@ export const ScheduleMessageSchema = z.object({
     .number()
     .describe("Recurring interval in milliseconds")
     .optional(),
+});
+
+export const ListJobsSchema = z.object({});
+
+export const CancelJobSchema = z.object({
+  job_id: z.string().describe("The ID of the job to cancel"),
 });

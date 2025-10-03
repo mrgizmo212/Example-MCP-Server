@@ -1,7 +1,7 @@
 import { z } from "zod";
 import axios from "axios";
 import dotenv from "dotenv";
-import { Job, Queue, Worker } from "bullmq";
+import { Job, JobSchedulerJson, Queue, Worker } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import express, { Request, Response } from "express";
@@ -21,6 +21,8 @@ import {
   GetServerInfoSchema,
   LongRunningTestSchema,
   ScheduleMessageSchema,
+  ListJobsSchema,
+  CancelJobSchema,
 } from "./tools/schemas.js";
 
 console.error("Starting Streamable HTTP server...");
@@ -127,8 +129,8 @@ function createServer() {
           console.error("Handling streaming response from LibreChat");
 
           response.data.on("data", (chunk: Buffer) => {
-            const text = chunk.toString();
-            console.error("Stream chunk:", text);
+            // const text = chunk.toString();
+            // console.error("Stream chunk:", text);
           });
 
           response.data.on("end", () => {
@@ -210,6 +212,16 @@ function createServer() {
         name: ToolName.SCHEDULE_MESSAGE,
         description: "Schedule a message to be sent at a later time",
         inputSchema: zodToJsonSchema(ScheduleMessageSchema) as ToolInput,
+      },
+      {
+        name: ToolName.LIST_JOBS,
+        description: "List all jobs in the messageQueue",
+        inputSchema: zodToJsonSchema(ListJobsSchema) as ToolInput,
+      },
+      {
+        name: ToolName.CANCEL_JOB,
+        description: "Cancel a job in the messageQueue",
+        inputSchema: zodToJsonSchema(CancelJobSchema) as ToolInput,
       },
     ];
 
@@ -524,17 +536,16 @@ function createServer() {
           delay: effective_delay_ms,
           removeOnComplete: true,
           removeOnFail: true,
-          jobId: `${userId}-${randomUUID()}`,
         });
       } else {
         job = await messageQueue.upsertJobScheduler(
-          "repeat_schedule_message",
+          "repeat_schedule_message-" + userId + "-" + randomUUID(),
           {
-            jobId: `${userId}-${randomUUID()}`,
             every: repeat_every_ms,
             startDate: new Date(new Date().getTime() + effective_delay_ms),
           },
           {
+            name: `${userId}`,
             data: jobData,
             opts: {
               removeOnComplete: true,
@@ -563,6 +574,76 @@ function createServer() {
               null,
               2
             ),
+          },
+        ],
+      };
+    }
+    if (name === ToolName.LIST_JOBS) {
+      const jobs = await messageQueue.getJobs();
+      const jobSchedulers = await messageQueue.getJobSchedulers();
+      const userJobs = jobs.filter((job) => job.data.user_id === userId);
+      const userSchedulers = jobSchedulers.filter((scheduler) =>
+        scheduler.id?.includes(`-${userId}-`)
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              "User jobs: " +
+              JSON.stringify(userJobs, null, 2) +
+              "\nUser job schedulers: " +
+              JSON.stringify(userSchedulers, null, 2),
+          },
+        ],
+      };
+    }
+    if (name === ToolName.CANCEL_JOB) {
+      const validatedArgs = CancelJobSchema.parse(args);
+      const job = await messageQueue.getJob(validatedArgs.job_id);
+      let removed = false;
+
+      if (job) {
+        // Check if job belongs to user
+        if (job.data.user_id !== userId) {
+          throw new Error(
+            `Job ${validatedArgs.job_id} does not belong to user`
+          );
+        }
+
+        // Check if it's a recurring job (has repeat options)
+        if (job.opts.repeat) {
+          const schedulerId = job.id;
+          if (!schedulerId) {
+            throw new Error("Cannot determine scheduler ID for recurring job");
+          }
+          console.error(`Removing scheduler for recurring job: ${schedulerId}`);
+          removed = await messageQueue.removeJobScheduler(schedulerId);
+        } else {
+          // For regular one-time jobs, just remove the job
+          removed = !!(await messageQueue.remove(validatedArgs.job_id));
+        }
+      } else {
+        // Try to remove as scheduler if job not found
+        console.error(
+          `Job not found, trying to remove as scheduler: ${validatedArgs.job_id}`
+        );
+
+        // Check if scheduler ID contains user ID
+        if (!validatedArgs.job_id.includes(`-${userId}-`)) {
+          throw new Error(
+            `Scheduler ${validatedArgs.job_id} does not belong to user`
+          );
+        }
+
+        removed = await messageQueue.removeJobScheduler(validatedArgs.job_id);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Job ${validatedArgs.job_id} cancelled: ${removed}`,
           },
         ],
       };
