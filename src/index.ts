@@ -637,8 +637,13 @@ app.get("/mcp", async (req: Request, res: Response) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Cache-Control");
+  res.setHeader("X-Accel-Buffering", "no"); // Disable proxy buffering
 
   const transport = transports.get(sessionId)!;
+
+  // Send initial comment immediately to flush buffers and establish connection
+  res.write(": connected\n\n");
+  res.flushHeaders();
 
   // Add keep-alive ping
   const keepAlive = setInterval(() => {
