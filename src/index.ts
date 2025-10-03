@@ -517,21 +517,54 @@ function createServer() {
         repeat_every_ms,
       };
 
-      const job = await messageQueue.add("schedule_message", jobData, {
-        delay: effective_delay_ms,
-        removeOnComplete: true,
-        removeOnFail: true,
-        // jobId: `${userId}-${randomUUID()}`,
-      });
+      let job: Job;
+
+      if (!repeat_every_ms) {
+        job = await messageQueue.add("schedule_message", jobData, {
+          delay: effective_delay_ms,
+          removeOnComplete: true,
+          removeOnFail: true,
+          jobId: `${userId}-${randomUUID()}`,
+        });
+      } else {
+        job = await messageQueue.upsertJobScheduler(
+          "repeat_schedule_message",
+          {
+            jobId: `${userId}-${randomUUID()}`,
+            every: repeat_every_ms,
+            startDate: new Date(new Date().getTime() + effective_delay_ms),
+          },
+          {
+            data: jobData,
+            opts: {
+              removeOnComplete: true,
+              removeOnFail: true,
+            },
+          }
+        );
+      }
 
       return {
-        queue: "messageQueue",
-        jobId: job.id,
-        name: "schedule_message",
-        scheduledInMs: effective_delay_ms,
-        runAt: new Date(
-          new Date().getTime() + effective_delay_ms
-        ).toISOString(),
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                queue: "messageQueue",
+                jobId: job.id,
+                name: "schedule_message",
+                scheduledInMs: effective_delay_ms,
+                runAt: new Date(
+                  new Date().getTime() + effective_delay_ms
+                ).toISOString(),
+                repeating: repeat_every_ms !== undefined,
+                repeatEveryMs: repeat_every_ms,
+              },
+              null,
+              2
+            ),
+          },
+        ],
       };
     }
 
